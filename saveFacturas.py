@@ -9,43 +9,65 @@ f = open(path_json)
 df = json.load(f)
 f.close()
 
-for ar in os.listdir(df['rutaZips']):
-    if ar.endswith(".zip"):
-        test_file_name = "{}{}".format(df['rutaZips'], ar)
-        zip = ZipFile(test_file_name, 'r')
-        print('-' * 70)
-        print("*** ZIP {} ***".format(zip.filename))
-        zip.printdir()
-        files_in_zip = zip.namelist()
-        if len(files_in_zip) == 2:
-            if files_in_zip[0].upper().endswith('.XML'):
-                xml_file = files_in_zip[0]
-            elif files_in_zip[1].upper().endswith('.XML'):
-                xml_file = files_in_zip[1]
-            else:
-                print(" *** No hay archivo XML en este ZIP *** ")
+if __name__ == "__main__":
+    available_files = os.listdir(df['rutaZips'])
+    xml_files = []
+    pdf_files = []
+    zip_files = []
+    zip_content = {}
+    while available_files:  # mientras la lista tenga elementos
+        file = available_files.pop()
+        if file.endswith('.xml'):
+            xml_files.append(file[:-4])
+        elif file.endswith('.pdf'):
+            pdf_files.append(file[:-4])
+        elif file.endswith('.zip'):
+            zip_files.append(file)
+            test_file_name = "{}\{}".format(df['rutaZips'], file)
+            zip = ZipFile(test_file_name, 'r')
+            # print("*** ZIP {} ***".format(zip.filename))
+            #zip.printdir() # imprime el contenido del zip
+            files_in_zip = zip.namelist()
+            available_files.extend(files_in_zip)
+            zip_content[tuple(files_in_zip)] = file
+            zip.close()
 
-            if files_in_zip[0].upper().endswith('.PDF'):
-                pdf_file = files_in_zip[0]
-            elif files_in_zip[1].upper().endswith('.PDF'):
-                pdf_file = files_in_zip[1]
-            else:
-                print(" *** No hay archivo PDF en este ZIP ***")
-                continue
-        else:
-            print(" ADVERTENCIA: ESTE ZIP NO FUE PROCESADO PORQUE NO TENIA "
-                  "2 ARCHIVOS EN SU INTERIR")
-            continue
-        zip.extractall()
+    selected_files = list(set(xml_files) & set(pdf_files))
+    num = 0
+    is_found = False
+    while selected_files:
+        file = selected_files.pop()
+        xml_file = "{}\{}.xml".format(df['rutaZips'], file)
+        if not is_found:
+            zip_filename = None
         try:
             tree = etree.parse(xml_file)
-        except FileNotFoundError:
-            print(" *** El archivo {} no se encontro *** ".format(xml_file))
+        except:
+            for _zip_files, zip_name in zip_content.items():
+                if "{}.xml".format(file) in _zip_files:
+                    test_file_name = "{}\{}".format(df['rutaZips'], zip_name)
+                    zip = ZipFile(test_file_name, 'r')
+                    zip.extractall(path=df['rutaZips'])
+                    zip_filename = zip.filename
+                    zip.close()
+                    selected_files.append(file)
+                    zip_content.pop(_zip_files)
+                    is_found = True
+                    break
+            if not is_found:
+                print(" *** Los archivos con nombre {} no se encontraron *** ".format(file))
             continue
+        is_found = False
         xml_root = tree.getroot()
         xml_tags_prefix = xml_root.tag.split('}')[0][1:]
         # print(xml_tags_prefix)
         emisor_info = xml_root.find('{}{}{}Emisor'.format('{', xml_tags_prefix, '}'))
+        receptor_info = xml_root.find('{}{}{}Receptor'.format('{', xml_tags_prefix, '}'))
+        uso_cfdi = receptor_info.attrib['UsoCFDI']
+        if uso_cfdi == 'G02':
+            tipo_fact = 'nc'
+        else:
+            tipo_fact = ''
         # print(emisor_info.attrib)
         emisor_rfc = emisor_info.attrib['Rfc']
         folio = xml_root.attrib['Folio']
@@ -61,46 +83,34 @@ for ar in os.listdir(df['rutaZips']):
         month = fecha[1]
         day = fecha[2].split('T')[0]
         total = xml_root.attrib['Total']
-        file_name = "{}{}__{}__{}-{}-{}__${}".format(serie, folio,
+        file_name = "{}{}__{}__{}-{}-{}_{}_${}".format(serie, folio,
                                                      emisor_info.attrib['Nombre'].replace(' ', '_').capitalize(), year,
-                                                     month, day, total)
-        try:
-            print("\n\t ***  Archivo {} *** ".format(xml_file))
-            shutil.move(xml_file, "{}\{}.xml".format(df['rutaGuardarArchivos'], file_name))
-            print("\t Nuevo nombre: {}.xml".format(file_name))
-            print("\t Ruta: {}".format(df['rutaGuardarArchivos']))
-        except NameError:
-            print(" ADVERTENCIA: YA EXISTE UN ARCHIVO CON EL MISMO NOMBRE")
-        except PermissionError:
-            print(" ERROR: EL ARCHIVO ESTA ABIERTO POR OTRO PROGRAMA ")
-        except:
-            print(" ERROR: contacta a tu programador")
-        try:
-            print("\n\t ***  Archivo {} *** ".format(pdf_file))
-            shutil.move(pdf_file, "{}\{}.pdf".format(df['rutaGuardarArchivos'], file_name))
-            print("\t Nuevo nombre: {}.pdf".format(file_name))
-            print("\t Ruta: {}".format(df['rutaGuardarArchivos']))
-        except NameError:
-            print(" ADVERTENCIA: YA EXISTE UN ARCHIVO CON EL MISMO NOMBRE")
-        except PermissionError:
-            print(" ERROR: EL ARCHIVO ESTA ABIERTO POR OTRO PROGRAMA ")
-        except:
-            print(" ERROR: contacta a tu programador")
+                                                     month, day, tipo_fact, total)
+        num += 1
+        print('-'*70)
+        print("{}. Archivos procesados correctamente: ".format(num))
+        for file_type in ['.xml', '.pdf']:
+            _file = "{}\{}{}".format(df['rutaZips'], file, file_type)
+            try:
+                print("\n\t ***  Archivo {} *** ".format(_file))
+                shutil.move(_file, "{}\{}{}".format(df['rutaGuardarArchivos'], file_name, file_type))
+                print("\t Nuevo nombre: {}{}".format(file_name, file_type))
+                print("\t Nueva ubicacion: {}".format(df['rutaGuardarArchivos']))
+            except NameError:
+                print(" ADVERTENCIA: YA EXISTE UN ARCHIVO CON EL MISMO NOMBRE")
+            except PermissionError:
+                print(" ERROR: EL ARCHIVO ESTA ABIERTO POR OTRO PROGRAMA ")
 
-        ##            try:
-        zip_filename = zip.filename
-        zip.close()
-        shutil.move("{}".format(zip_filename), "{}\{}.zip".format(df['rutaGuardarZips'], file_name))
-        print("\n\t *** {} ***".format(zip_filename))
-        print("\t Nuevo nombre: {}.zip".format(file_name))
-        print("\t Ruta: {}".format(df['rutaGuardarZips']))
+        if zip_filename is not None:
+            shutil.move("{}".format(zip_filename), "{}\{}.zip".format(df['rutaGuardarZips'], file_name))
+            print("\n\t *** {} ***".format(zip_filename))
+            print("\t Nuevo nombre: {}.zip".format(file_name))
+            print("\t Nueva ubicacion: {}".format(df['rutaGuardarZips']))
 
 ##            except IOError:
 ##                try:
 ##
 ##                    os.mkdir("{}".format(df['rutaGuardarZips']))
-##                    for num in range(1000):
-##                        pass
 ##                    shutil.move("{}".format(zip.filename),"{}\{}.zip".format(df['rutaGuardarZips'],file_name))
 ##                    print("\n\t *** {} ***".format(zip.filename))
 ##                    print("\t Nuevo nombre: {}.zip".format(file_name))
@@ -112,6 +122,7 @@ for ar in os.listdir(df['rutaZips']):
 #    print(" ERROR: contacta a tu programador")
 # except:
 #   print(" ERROR: contacta a tu programador")
+
 '''
 class Helper:
     def __init__(self, json_file):
